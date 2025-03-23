@@ -5,9 +5,9 @@
   "main": "main.js",
   "scripts": {
     "dev": "vite",
-    "build": "npm run build",
+    "build": "vite build",
     "preview": "vite preview",
-    "deploy": "npm run deploy"
+    "deploy": "vite deploy"
   },
   "dependencies": {
     "three": "^0.162.0"
