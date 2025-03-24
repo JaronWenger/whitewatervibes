@@ -4,10 +4,10 @@
   "description": "A 3D kayaking experience built with Three.js",
   "main": "main.js",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "deploy": "vite deploy"
+    "dev": "npx vite",
+    "build": "npx vite build",
+    "preview": "npx vite preview",
+    "deploy": "npx vite deploy"
   },
   "dependencies": {
     "three": "^0.162.0"
