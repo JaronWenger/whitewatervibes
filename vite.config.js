@@ -3,7 +3,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   base: '/whitewatervibes/',
   server: {
-    open: true
+    port: 3000
   },
   build: {
     outDir: 'dist',
@@ -16,6 +16,14 @@ export default defineConfig({
         }
       }
     }
+  },
+  resolve: {
+    alias: {
+      'three': 'three'
+    }
+  },
+  optimizeDeps: {
+    include: ['three']
   },
   publicDir: 'public'
 }); 
