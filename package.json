@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "A 3D kayaking experience built with Three.js",
   "homepage": "https://jaronwenger.github.io/whitewatervibes/",
+  "type": "module",
   "main": "main.js",
   "scripts": {
     "dev": "vite",
