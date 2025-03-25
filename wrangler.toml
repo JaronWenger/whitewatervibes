@@ -1,0 +1,9 @@
+name = "whitewatervibes"
+type = "javascript"
+
+[build]
+command = "npm run build"
+directory = "dist"
+
+[env.production]
+name = "whitewatervibes-production"
