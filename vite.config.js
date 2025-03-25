@@ -5,6 +5,17 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
-    sourcemap: true
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          three: ['three'],
+          'three-examples': ['three/examples/jsm/objects/Water.js', 'three/examples/jsm/objects/Sky.js']
+        }
+      }
+    }
+  },
+  optimizeDeps: {
+    include: ['three']
   }
 }); 
