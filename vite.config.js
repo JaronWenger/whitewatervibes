@@ -12,7 +12,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          three: ['three']
+          three: ['three', 'three/examples/jsm/objects/Water.js', 'three/examples/jsm/objects/Sky.js']
         }
       }
     }
@@ -23,7 +23,7 @@ export default defineConfig({
     }
   },
   optimizeDeps: {
-    include: ['three']
+    include: ['three', 'three/examples/jsm/objects/Water.js', 'three/examples/jsm/objects/Sky.js']
   },
   publicDir: 'public'
 }); 
