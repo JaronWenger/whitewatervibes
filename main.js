@@ -105,26 +105,159 @@ terrain.rotation.x = -Math.PI / 2;
 terrain.receiveShadow = true;
 scene.add(terrain);
 
-// Create lake
-const lakeGeometry = new THREE.PlaneGeometry(400, 400, 50, 50);
-const lakeMaterial = new Water(
-    lakeGeometry,
-    {
-        textureWidth: 1024,
-        textureHeight: 1024,
-        waterNormals: new THREE.TextureLoader().load('waternormals.jpg', function(texture) {
-            texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-        }),
-        sunDirection: sun,
-        sunColor: 0xffffff,
-        waterColor: 0x0064b5,
-        distortionScale: 0.3,
-        fog: scene.fog !== undefined
-    }
-);
-lakeMaterial.rotation.x = -Math.PI / 2;
-lakeMaterial.position.y = -0.05;
-scene.add(lakeMaterial);
+// Create lake with improved shader
+const lakeGeometry = new THREE.PlaneGeometry(400, 400, 100, 100);
+const lakeMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+        uTime: { value: 0 },
+        uWavesAmplitude: { value: 0.5 },
+        uWavesSpeed: { value: 0.5 },
+        uWavesFrequency: { value: 0.1 },
+        uWavesPersistence: { value: 0.5 },
+        uWavesLacunarity: { value: 2.0 },
+        uWavesIterations: { value: 4.0 },
+        uOpacity: { value: 0.9 },
+        uTroughColor: { value: new THREE.Color(0x0064b5) },
+        uSurfaceColor: { value: new THREE.Color(0x0077ff) },
+        uPeakColor: { value: new THREE.Color(0x00a2ff) },
+        uPeakThreshold: { value: 0.1 },
+        uPeakTransition: { value: 0.05 },
+        uTroughThreshold: { value: -0.1 },
+        uTroughTransition: { value: 0.05 },
+        uFresnelScale: { value: 0.5 },
+        uFresnelPower: { value: 2.0 },
+        uEnvironmentMap: { value: new THREE.CubeTextureLoader().load([
+            'px.jpg', 'nx.jpg',
+            'py.jpg', 'ny.jpg',
+            'pz.jpg', 'nz.jpg'
+        ]) }
+    },
+    vertexShader: `
+        precision highp float;
+        uniform float uTime;
+        uniform float uWavesAmplitude;
+        uniform float uWavesSpeed;
+        uniform float uWavesFrequency;
+        uniform float uWavesPersistence;
+        uniform float uWavesLacunarity;
+        uniform float uWavesIterations;
+
+        varying vec3 vNormal;
+        varying vec3 vWorldPosition;
+
+        vec4 permute(vec4 x) {
+            return mod(((x * 34.0) + 1.0) * x, 289.0);
+        }
+
+        vec3 permute(vec3 x) {
+            return mod(((x * 34.0) + 1.0) * x, 289.0);
+        }
+
+        float snoise(vec2 v) {
+            const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+            vec2 i = floor(v + dot(v, C.yy));
+            vec2 x0 = v - i + dot(i, C.xx);
+            vec2 i1;
+            i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+            vec4 x12 = x0.xyxy + C.xxzz;
+            x12.xy -= i1;
+            i = mod(i, 289.0);
+            vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+            vec3 m = max(0.5 - vec3(dot(x0, x0), dot(x12.xy, x12.xy), dot(x12.zw, x12.zw)), 0.0);
+            m = m * m;
+            m = m * m;
+            vec3 x = 2.0 * fract(p * C.www) - 1.0;
+            vec3 h = abs(x) - 0.5;
+            vec3 ox = floor(x + 0.5);
+            vec3 a0 = x - ox;
+            m *= 1.79284291400159 - 0.85373472095314 * (a0 * a0 + h * h);
+            vec3 g;
+            g.x = a0.x * x0.x + h.x * x0.y;
+            g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+            return 130.0 * dot(m, g);
+        }
+
+        float getElevation(float x, float z) {
+            vec2 pos = vec2(x, z);
+            float elevation = 0.0;
+            float amplitude = 1.0;
+            float frequency = uWavesFrequency;
+            vec2 p = pos.xy;
+
+            for(float i = 0.0; i < uWavesIterations; i++) {
+                float noiseValue = snoise(p * frequency + uTime * uWavesSpeed);
+                elevation += amplitude * noiseValue;
+                amplitude *= uWavesPersistence;
+                frequency *= uWavesLacunarity;
+            }
+
+            elevation *= uWavesAmplitude;
+            return elevation;
+        }
+
+        void main() {
+            vec4 modelPosition = modelMatrix * vec4(position, 1.0);
+            float elevation = getElevation(modelPosition.x, modelPosition.z);
+            modelPosition.y += elevation;
+
+            float eps = 0.001;
+            vec3 tangent = normalize(vec3(eps, getElevation(modelPosition.x - eps, modelPosition.z) - elevation, 0.0));
+            vec3 bitangent = normalize(vec3(0.0, getElevation(modelPosition.x, modelPosition.z - eps) - elevation, eps));
+            vec3 objectNormal = normalize(cross(tangent, bitangent));
+
+            vNormal = objectNormal;
+            vWorldPosition = modelPosition.xyz;
+
+            gl_Position = projectionMatrix * viewMatrix * modelPosition;
+        }
+    `,
+    fragmentShader: `
+        precision highp float;
+        uniform float uOpacity;
+        uniform vec3 uTroughColor;
+        uniform vec3 uSurfaceColor;
+        uniform vec3 uPeakColor;
+        uniform float uPeakThreshold;
+        uniform float uPeakTransition;
+        uniform float uTroughThreshold;
+        uniform float uTroughTransition;
+        uniform float uFresnelScale;
+        uniform float uFresnelPower;
+        uniform samplerCube uEnvironmentMap;
+
+        varying vec3 vNormal;
+        varying vec3 vWorldPosition;
+
+        void main() {
+            vec3 viewDirection = normalize(vWorldPosition - cameraPosition);
+            vec3 reflectedDirection = reflect(viewDirection, vNormal);
+            reflectedDirection.x = -reflectedDirection.x;
+
+            vec4 reflectionColor = textureCube(uEnvironmentMap, reflectedDirection);
+
+            float fresnel = uFresnelScale * pow(1.0 - clamp(dot(viewDirection, vNormal), 0.0, 1.0), uFresnelPower);
+
+            float elevation = vWorldPosition.y;
+
+            float peakFactor = smoothstep(uPeakThreshold - uPeakTransition, uPeakThreshold + uPeakTransition, elevation);
+            float troughFactor = smoothstep(uTroughThreshold - uTroughTransition, uTroughThreshold + uTroughTransition, elevation);
+
+            vec3 mixedColor1 = mix(uTroughColor, uSurfaceColor, troughFactor);
+            vec3 mixedColor2 = mix(mixedColor1, uPeakColor, peakFactor);
+
+            vec3 finalColor = mix(mixedColor2, reflectionColor.rgb, fresnel);
+
+            gl_FragColor = vec4(finalColor, uOpacity);
+        }
+    `,
+    transparent: true,
+    side: THREE.DoubleSide
+});
+
+const lake = new THREE.Mesh(lakeGeometry, lakeMaterial);
+lake.rotation.x = -Math.PI / 2;
+lake.position.y = -0.05;
+scene.add(lake);
 
 // Create trees
 function createTree(x, z) {
@@ -214,8 +347,8 @@ loader.load(
     './models/scene.glb',
     function (gltf) {
         kayaker = gltf.scene;
-        kayaker.scale.set(0.5, 0.5, 0.5);
-        kayaker.position.set(0, 0.05, 0);
+        kayaker.scale.set(1.0, 1.0, 1.0);
+        kayaker.position.set(0, 0.1, 0);
         kayaker.rotation.y = Math.PI;
         scene.add(kayaker);
         
@@ -251,11 +384,20 @@ loader.load(
 
 // User controls for kayaking
 const kayakSpeed = 0.5;
-const rotationSpeed = 0.15;
+const rotationSpeed = 0.08;
 let kayakVelocity = new THREE.Vector3();
 let kayakRotation = 0;
 let targetRotation = 0;
-const rotationLerpFactor = 0.5;
+const rotationLerpFactor = 0.15;
+let rotationVelocity = 0;
+const rotationAcceleration = 0.15;
+const maxRotationSpeed = 0.08;
+
+// Add forward movement parameters
+let forwardVelocity = 0;
+const maxSpeed = 0.5;
+const acceleration = 0.02; // Slower acceleration for smoother movement
+const deceleration = 0.02; // Same as acceleration for consistent feel
 
 // Track active keys
 const activeKeys = new Set();
@@ -272,28 +414,33 @@ document.addEventListener('keyup', (event) => {
 
 // Update movement based on active keys
 function updateMovement() {
-    // Reset velocity
-    kayakVelocity.z = 0;
-    
-    // Handle rotation
-    if (activeKeys.has('ArrowLeft')) {
-        targetRotation += rotationSpeed;
-    }
-    if (activeKeys.has('ArrowRight')) {
-        targetRotation -= rotationSpeed;
-    }
-    
-    // Handle forward/backward movement
-    if (activeKeys.has('ArrowUp')) {
-        kayakVelocity.z = -kayakSpeed;
-    }
+    // Handle forward/backward movement with smooth acceleration/deceleration
     if (activeKeys.has('ArrowDown')) {
-        kayakVelocity.z = kayakSpeed;
+        forwardVelocity = Math.min(forwardVelocity + acceleration, maxSpeed);
+    } else if (activeKeys.has('ArrowUp')) {
+        forwardVelocity = Math.max(forwardVelocity - acceleration, -maxSpeed);
+    } else {
+        // Smoothly decelerate to stop when no keys are pressed
+        if (forwardVelocity > 0) {
+            forwardVelocity = Math.max(0, forwardVelocity - deceleration);
+        } else if (forwardVelocity < 0) {
+            forwardVelocity = Math.min(0, forwardVelocity + deceleration);
+        }
+    }
+    
+    // Handle rotation with smooth acceleration/deceleration
+    if (activeKeys.has('ArrowLeft')) {
+        rotationVelocity = Math.min(rotationVelocity + rotationAcceleration, maxRotationSpeed);
+    } else if (activeKeys.has('ArrowRight')) {
+        rotationVelocity = Math.max(rotationVelocity - rotationAcceleration, -maxRotationSpeed);
+    } else {
+        // Simply stop rotation when no keys are pressed
+        rotationVelocity = 0;
     }
 }
 
 // Camera follow settings
-const cameraOffset = new THREE.Vector3(0, 3, 4);
+const cameraOffset = new THREE.Vector3(0, 6, 8);
 const cameraLerpFactor = 0.2;
 
 // Update camera position and target
@@ -301,7 +448,7 @@ function updateCamera() {
     if (!kayaker) return;
     
     // Calculate target position (slightly above kayaker)
-    const targetPosition = kayaker.position.clone().add(new THREE.Vector3(0, 2, 0));
+    const targetPosition = kayaker.position.clone().add(new THREE.Vector3(0, 4, 0));
     
     // Calculate camera position based on kayaker's rotation and offset
     const cameraPosition = kayaker.position.clone()
@@ -371,12 +518,43 @@ for (let i = 0; i < fishCount; i++) {
     
     // Random settings for each fish
     fishSettings.push({
-        jumpHeight: 1.5 + Math.random() * 1.5,
-        jumpSpeed: 0.8 + Math.random() * 0.4,
+        jumpHeight: 2 + Math.random() * 2,
+        jumpSpeed: 1 + Math.random() * 0.5,
         jumpOffset: Math.random() * Math.PI * 2,
-        initialX: x,
-        initialZ: z
+        swimSpeed: 0.5 + Math.random() * 0.5,
+        swimRadius: radius,
+        swimAngle: angle
     });
+}
+
+// Add wave function for kayaker bobbing
+function getWaveHeight(x, z, time) {
+    // Match water shader parameters exactly
+    const amplitude = 0.5; // Match uWavesAmplitude
+    const frequency = 0.1; // Match uWavesFrequency
+    const speed = 0.5; // Match uWavesSpeed
+    const persistence = 0.5; // Match uWavesPersistence
+    const lacunarity = 2.0; // Match uWavesLacunarity
+    const iterations = 4.0; // Match uWavesIterations
+    
+    let elevation = 0.0;
+    let currentAmplitude = 1.0;
+    let currentFrequency = frequency;
+    
+    // Use the same wave calculation as the water shader
+    for (let i = 0; i < iterations; i++) {
+        const noiseValue = Math.sin(x * currentFrequency + time * speed) * 
+                          Math.cos(z * currentFrequency + time * speed);
+        elevation += currentAmplitude * noiseValue;
+        currentAmplitude *= persistence;
+        currentFrequency *= lacunarity;
+    }
+    
+    // Scale the elevation to match water shader
+    elevation *= amplitude;
+    
+    // Ensure minimum height above water
+    return Math.max(0.05, elevation + 0.05);
 }
 
 // Animation loop
@@ -385,9 +563,13 @@ function animate() {
     
     const time = performance.now() * 0.001;
     
+    // Update water shader
+    lakeMaterial.uniforms.uTime.value = time;
+    
     // Update kayaker position and rotation
     if (kayaker) {
-        // More immediate rotation interpolation
+        // Apply smooth rotation with easing
+        targetRotation += rotationVelocity;
         kayakRotation += (targetRotation - kayakRotation) * rotationLerpFactor;
         kayaker.rotation.y = kayakRotation;
         
@@ -398,8 +580,8 @@ function animate() {
             Math.cos(kayakRotation)
         );
         
-        // Apply velocity
-        kayaker.position.add(moveDirection.multiplyScalar(kayakVelocity.z));
+        // Apply velocity with smooth acceleration/deceleration
+        kayaker.position.add(moveDirection.multiplyScalar(forwardVelocity));
         
         // Keep kayaker within lake bounds
         const distanceFromCenter = kayaker.position.length();
@@ -407,8 +589,13 @@ function animate() {
             kayaker.position.normalize().multiplyScalar(190);
         }
         
-        // Add gentle bobbing motion while maintaining base height
-        kayaker.position.y = 0.05 + Math.sin(time * 2) * 0.02;
+        // Add wave-based bobbing motion
+        const waveHeight = getWaveHeight(kayaker.position.x, kayaker.position.z, time);
+        kayaker.position.y = waveHeight;
+        
+        // Add slight rotation to match wave motion
+        kayaker.rotation.x = Math.sin(time * 0.5) * 0.05; // Reduced rotation
+        kayaker.rotation.z = Math.sin(time * 0.5) * 0.02; // Reduced rotation
 
         // Try to animate the paddle if it exists
         if (kayaker.paddle) {
@@ -433,22 +620,21 @@ function animate() {
         }
     }
     
-    // Update lake
-    lakeMaterial.material.uniforms['time'].value += 1.0 / 60.0;
-    
     // Update fish positions
     fish.forEach((fish, index) => {
         const settings = fishSettings[index];
         
-        // Create a smooth arc motion
-        const jumpPhase = Math.sin(time * settings.jumpSpeed + settings.jumpOffset);
-        const jumpY = Math.max(0, jumpPhase) * settings.jumpHeight;
-        
-        // Update position with arc motion
+        // Jumping motion
+        const jumpY = Math.sin(time * settings.jumpSpeed + settings.jumpOffset) * settings.jumpHeight;
         fish.position.y = -0.1 + jumpY;
         
-        // Add slight rotation to face upward during jump
-        fish.rotation.x = jumpPhase * 0.3;
+        // Swimming motion
+        settings.swimAngle += settings.swimSpeed * 0.01;
+        fish.position.x = Math.cos(settings.swimAngle) * settings.swimRadius;
+        fish.position.z = Math.sin(settings.swimAngle) * settings.swimRadius;
+        
+        // Make fish face direction of movement
+        fish.rotation.y = settings.swimAngle + Math.PI / 2;
         
         // Add tail wagging
         fish.children[1].rotation.y = Math.sin(time * 5) * 0.3;
