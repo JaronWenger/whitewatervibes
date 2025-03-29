@@ -661,5 +661,5 @@ window.addEventListener('resize', () => {
 // Start animation
 animate();
 
-// Remove OrbitControls since we're using custom camera
+// Remove OrbitControls since we're using custom cameras
 controls.dispose(); 
